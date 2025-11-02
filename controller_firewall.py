@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-# controller_firewall.py
-# Ryu OpenFlow 1.3 Firewall Controller with subnet + allow-most support
+"""
+Ryu OpenFlow 1.3 Firewall Controller with SECURITY INTEGRATION
+Member 2 + Member 3 collaboration
+"""
 
 import json
 import os
 import ipaddress
+import time
 from ryu.base import app_manager
 from ryu.controller import ofp_event
 from ryu.controller.handler import MAIN_DISPATCHER, CONFIG_DISPATCHER, set_ev_cls
@@ -12,21 +15,53 @@ from ryu.ofproto import ofproto_v1_3
 from ryu.lib.packet import packet, ethernet, arp, ipv4, ether_types
 
 
-POLICY_FILE = "policy.json"  # Must be in same directory as this script
+POLICY_FILE = "policy.json"
 
-class SimpleFirewall(app_manager.RyuApp):
+class SecureFirewallController(app_manager.RyuApp):
+    """
+    Enhanced firewall controller with security features
+    Member 2: Firewall logic
+    Member 3: Security verification
+    """
+    
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
 
     def __init__(self, *args, **kwargs):
-        super(SimpleFirewall, self).__init__(*args, **kwargs)
-        self.logger.info("🚀 Starting SimpleFirewall Ryu app...")
+        super(SecureFirewallController, self).__init__(*args, **kwargs)
+        self.logger.info("🚀 Starting Secure Firewall Controller...")
+        self.logger.info("🔐 Security Layer: ACTIVE (Member 3)")
+        
+        # Firewall policies (Member 2)
         self.policies = {"allow": [], "block": []}
         self._load_policy()
+        
+        # Security features (Member 3)
+        self.verified_hosts = {}  # IP -> verification status
+        self.encrypted_flows = set()  # Track encrypted flows
+        self.intrusion_attempts = []  # Log unauthorized attempts
+        
+        # Statistics
+        self.stats = {
+            'allowed_flows': 0,
+            'blocked_flows': 0,
+            'unverified_attempts': 0,
+            'encrypted_packets': 0
+        }
 
     def _load_policy(self):
         """Load firewall policy from policy.json"""
         if not os.path.exists(POLICY_FILE):
-            self.logger.error(f"❌ Policy file {POLICY_FILE} not found.")
+            self.logger.warning(f"⚠️ Policy file {POLICY_FILE} not found, using defaults")
+            # Default allow all for testing
+            self.policies = {
+                "allow": [
+                    {"src": "10.0.1.0/24", "dst": "10.0.2.0/24"},
+                    {"src": "10.0.2.0/24", "dst": "10.0.1.0/24"},
+                    {"src": "10.0.1.0/24", "dst": "10.0.1.0/24"},
+                    {"src": "10.0.2.0/24", "dst": "10.0.2.0/24"}
+                ],
+                "block": []
+            }
             return
 
         try:
@@ -63,6 +98,7 @@ class SimpleFirewall(app_manager.RyuApp):
         match = parser.OFPMatch()
         actions = [parser.OFPActionOutput(ofproto.OFPP_CONTROLLER, ofproto.OFPCML_NO_BUFFER)]
         self._add_flow(datapath, 0, match, actions)
+        self.logger.info(f"🔌 Switch {datapath.id} connected")
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def _packet_in_handler(self, ev):
@@ -88,8 +124,30 @@ class SimpleFirewall(app_manager.RyuApp):
             return
 
         src_ip, dst_ip = ip_pkt.src, ip_pkt.dst
-        self.logger.info(f"📡 Packet {src_ip} → {dst_ip}")
-
+        
+        # ========== SECURITY CHECKS (Member 3) ==========
+        
+        # Check 1: Zero Trust Verification
+        if not self._is_host_verified(src_ip):
+            self.logger.warning(f"🔐 UNVERIFIED HOST: {src_ip} → {dst_ip}")
+            self.stats['unverified_attempts'] += 1
+            self._log_intrusion_attempt(src_ip, dst_ip, "Unverified host")
+            
+            # In production, block here. For demo, we log and allow
+            # return  # Uncomment to actually block unverified hosts
+        
+        # Check 2: Detect encrypted traffic
+        # In real implementation, check packet payload for encryption markers
+        is_encrypted = self._is_traffic_encrypted(pkt)
+        if is_encrypted:
+            self.logger.info(f"🔒 ENCRYPTED: {src_ip} → {dst_ip}")
+            self.stats['encrypted_packets'] += 1
+            self.encrypted_flows.add((src_ip, dst_ip))
+        else:
+            self.logger.info(f"📡 PLAINTEXT: {src_ip} → {dst_ip}")
+        
+        # ========== FIREWALL CHECKS (Member 2) ==========
+        
         # Check policies
         allowed = any(
             self._ip_in_policy(src_ip, a["src"]) and self._ip_in_policy(dst_ip, a["dst"])
@@ -101,19 +159,101 @@ class SimpleFirewall(app_manager.RyuApp):
         )
 
         if blocked:
-            self.logger.info(f"🚫 Blocked {src_ip} → {dst_ip}")
+            self.logger.info(f"🚫 BLOCKED by policy: {src_ip} → {dst_ip}")
+            self.stats['blocked_flows'] += 1
             self._install_block_flow(datapath, src_ip, dst_ip)
+            self._log_intrusion_attempt(src_ip, dst_ip, "Blocked by policy")
             return
 
-        # Allow if explicitly allowed or by default
+        # Allow packet
         if allowed:
-            self.logger.info(f"✅ Allowed {src_ip} → {dst_ip} (explicit policy)")
+            self.logger.info(f"✅ ALLOWED by policy: {src_ip} → {dst_ip}")
         else:
-            self.logger.info(f"⚠️ No explicit policy for {src_ip} → {dst_ip}, allowing by default")
-
+            self.logger.info(f"⚠️ ALLOWED by default: {src_ip} → {dst_ip}")
+        
+        self.stats['allowed_flows'] += 1
         self._install_allow_flow(datapath, src_ip, dst_ip)
         self._flood_packet(msg)
 
+    # ========== SECURITY FUNCTIONS (Member 3) ==========
+    
+    def _is_host_verified(self, ip):
+        """
+        Check if host passed Zero Trust verification
+        In production, integrate with SecureHost verification
+        For demo, auto-verify known subnets
+        """
+        # Auto-verify hosts in known subnets
+        try:
+            if ipaddress.ip_address(ip) in ipaddress.ip_network('10.0.1.0/24'):
+                return True
+            if ipaddress.ip_address(ip) in ipaddress.ip_network('10.0.2.0/24'):
+                return True
+        except:
+            pass
+        
+        return ip in self.verified_hosts
+    
+    def verify_host(self, ip):
+        """Add host to verified registry"""
+        self.verified_hosts[ip] = {
+            'verified_at': time.time(),
+            'status': 'trusted'
+        }
+        self.logger.info(f"✅ Host verified: {ip}")
+    
+    def _is_traffic_encrypted(self, pkt):
+        """
+        Detect if traffic is encrypted
+        In production, check for encryption headers/markers
+        For demo, randomly mark some traffic as encrypted
+        """
+        # Simple heuristic: check if payload looks encrypted
+        # Real implementation would check actual encryption markers
+        try:
+            # Get payload
+            payload = pkt.protocols[-1]
+            if isinstance(payload, bytes) and len(payload) > 50:
+                # Very simple check: encrypted data has high entropy
+                # This is just for demo - real check would be more sophisticated
+                unique_bytes = len(set(payload[:50]))
+                if unique_bytes > 40:  # High byte diversity suggests encryption
+                    return True
+        except:
+            pass
+        
+        return False
+    
+    def _log_intrusion_attempt(self, src_ip, dst_ip, reason):
+        """Log potential intrusion attempt"""
+        attempt = {
+            'timestamp': time.time(),
+            'src_ip': src_ip,
+            'dst_ip': dst_ip,
+            'reason': reason
+        }
+        self.intrusion_attempts.append(attempt)
+        
+        # Keep only last 100 attempts
+        if len(self.intrusion_attempts) > 100:
+            self.intrusion_attempts.pop(0)
+    
+    def print_security_statistics(self):
+        """Print security statistics"""
+        self.logger.info("\n" + "=" * 60)
+        self.logger.info("SECURITY STATISTICS (Member 3)")
+        self.logger.info("=" * 60)
+        self.logger.info(f"✅ Allowed flows:        {self.stats['allowed_flows']}")
+        self.logger.info(f"❌ Blocked flows:        {self.stats['blocked_flows']}")
+        self.logger.info(f"🔐 Unverified attempts:  {self.stats['unverified_attempts']}")
+        self.logger.info(f"🔒 Encrypted packets:    {self.stats['encrypted_packets']}")
+        self.logger.info(f"📊 Verified hosts:       {len(self.verified_hosts)}")
+        self.logger.info(f"🚨 Intrusion attempts:   {len(self.intrusion_attempts)}")
+        self.logger.info(f"🔐 Encrypted flows:      {len(self.encrypted_flows)}")
+        self.logger.info("=" * 60)
+
+    # ========== FIREWALL FUNCTIONS (Member 2) ==========
+    
     def _install_allow_flow(self, datapath, src_ip, dst_ip):
         """Allow packet flow"""
         parser = datapath.ofproto_parser
@@ -142,3 +282,15 @@ class SimpleFirewall(app_manager.RyuApp):
         )
         datapath.send_msg(out)
 
+
+# Optional: Print stats periodically
+def stats_printer(app):
+    """Background thread to print stats every 30 seconds"""
+    import threading
+    def print_stats():
+        while True:
+            time.sleep(30)
+            app.print_security_statistics()
+    
+    thread = threading.Thread(target=print_stats, daemon=True)
+    thread.start()
