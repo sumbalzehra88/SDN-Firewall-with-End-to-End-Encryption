@@ -392,7 +392,7 @@ def run():
 
     # Initialize Security
     info('\n' + '=' * 60 + '\n')
-    info('INITIALIZING SECURITY LAYER (Member 3)\n')
+    info('INITIALIZING SECURITY LAYER \n')
     info('=' * 60 + '\n')
     
     try:
