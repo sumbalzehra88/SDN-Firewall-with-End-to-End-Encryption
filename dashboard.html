@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SDN Firewall Dashboard</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: Arial, sans-serif; 
+            background: #1a1a2e; 
+            color: #eee;
+            padding: 20px;
+        }
+        .header {
+            text-align: center;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: #16213e;
+            padding: 20px;
+            border-radius: 10px;
+            border-left: 4px solid;
+            transition: transform 0.2s;
+        }
+        .stat-card:hover { transform: translateY(-5px); }
+        .stat-card.green { border-color: #4caf50; }
+        .stat-card.red { border-color: #f44336; }
+        .stat-card.blue { border-color: #2196f3; }
+        .stat-card.orange { border-color: #ff9800; }
+        .stat-card.purple { border-color: #9c27b0; }
+        
+        .stat-value {
+            font-size: 36px;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        .stat-label {
+            color: #aaa;
+            font-size: 14px;
+        }
+        
+        .content-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .panel {
+            background: #16213e;
+            padding: 20px;
+            border-radius: 10px;
+        }
+        
+        .panel-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #667eea;
+        }
+        
+        .flow-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .flow-table th {
+            background: #0f3460;
+            padding: 10px;
+            text-align: left;
+        }
+        .flow-table td {
+            padding: 10px;
+            border-bottom: 1px solid #0f3460;
+        }
+        
+        .status-badge {
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .status-allowed { background: #4caf50; }
+        .status-blocked { background: #f44336; }
+        .status-encrypted { background: #2196f3; }
+        
+        .event-item {
+            padding: 10px;
+            margin-bottom: 10px;
+            background: #0f3460;
+            border-radius: 5px;
+            border-left: 3px solid #ff9800;
+        }
+        
+        .refresh-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .refresh-btn:hover { background: #764ba2; }
+        
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #aaa;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>🛡️ SDN Firewall Dashboard</h1>
+        <p>Real-time Network Security Monitoring</p>
+        <button class="refresh-btn" onclick="loadData()">🔄 Refresh Now</button>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="stats-grid">
+        <div class="stat-card green">
+            <div class="stat-label">✅ Allowed Flows</div>
+            <div class="stat-value" id="allowed">0</div>
+        </div>
+        <div class="stat-card red">
+            <div class="stat-label">🚫 Blocked Flows</div>
+            <div class="stat-value" id="blocked">0</div>
+        </div>
+        <div class="stat-card blue">
+            <div class="stat-label">🔒 Encrypted Packets</div>
+            <div class="stat-value" id="encrypted">0</div>
+        </div>
+        <div class="stat-card orange">
+            <div class="stat-label">🔍 Unverified Attempts</div>
+            <div class="stat-value" id="unverified">0</div>
+        </div>
+        <div class="stat-card purple">
+            <div class="stat-label">📊 Encryption Rate</div>
+            <div class="stat-value" id="encryption-rate">0%</div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="content-grid">
+        <!-- Recent Flows -->
+        <div class="panel">
+            <div class="panel-title">📡 Recent Traffic Flows</div>
+            <div id="flows-container">
+                <div class="loading">Loading flows...</div>
+            </div>
+        </div>
+
+        <!-- Security Events -->
+        <div class="panel">
+            <div class="panel-title">🚨 Security Events</div>
+            <div id="events-container">
+                <div class="loading">Loading events...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Top Hosts -->
+    <div class="content-grid">
+        <div class="panel">
+            <div class="panel-title">📊 Top Source IPs</div>
+            <div id="top-sources">
+                <div class="loading">Loading...</div>
+            </div>
+        </div>
+        <div class="panel">
+            <div class="panel-title">📊 Top Destination IPs</div>
+            <div id="top-destinations">
+                <div class="loading">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:5000/api';
+
+        async function loadData() {
+            await Promise.all([
+                loadStats(),
+                loadFlows(),
+                loadEvents(),
+                loadTopHosts()
+            ]);
+        }
+
+        async function loadStats() {
+            try {
+                const response = await fetch(`${API_BASE}/stats`);
+                const data = await response.json();
+                
+                document.getElementById('allowed').textContent = data.allowed;
+                document.getElementById('blocked').textContent = data.blocked;
+                document.getElementById('encrypted').textContent = data.encrypted;
+                document.getElementById('unverified').textContent = data.unverified;
+                document.getElementById('encryption-rate').textContent = data.encryption_rate + '%';
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+
+        async function loadFlows() {
+            try {
+                const response = await fetch(`${API_BASE}/flows`);
+                const data = await response.json();
+                
+                const container = document.getElementById('flows-container');
+                
+                if (data.flows.length === 0) {
+                    container.innerHTML = '<div class="loading">No flows yet</div>';
+                    return;
+                }
+                
+                let html = '<table class="flow-table">';
+                html += '<tr><th>Source</th><th>Destination</th><th>Status</th><th>Time</th></tr>';
+                
+                data.flows.forEach(flow => {
+                    const statusClass = 'status-' + flow.status;
+                    html += `<tr>
+                        <td>${flow.src}</td>
+                        <td>${flow.dst}</td>
+                        <td><span class="status-badge ${statusClass}">${flow.status.toUpperCase()}</span></td>
+                        <td>${flow.time}</td>
+                    </tr>`;
+                });
+                
+                html += '</table>';
+                container.innerHTML = html;
+            } catch (error) {
+                console.error('Error loading flows:', error);
+            }
+        }
+
+        async function loadEvents() {
+            try {
+                const response = await fetch(`${API_BASE}/events`);
+                const data = await response.json();
+                
+                const container = document.getElementById('events-container');
+                
+                if (data.events.length === 0) {
+                    container.innerHTML = '<div class="loading">No events</div>';
+                    return;
+                }
+                
+                let html = '';
+                data.events.forEach(event => {
+                    html += `<div class="event-item">
+                        <strong>${event.message}</strong><br>
+                        <small>${event.time}</small>
+                    </div>`;
+                });
+                
+                container.innerHTML = html;
+            } catch (error) {
+                console.error('Error loading events:', error);
+            }
+        }
+
+        async function loadTopHosts() {
+            try {
+                const response = await fetch(`${API_BASE}/top-hosts`);
+                const data = await response.json();
+                
+                let sourcesHTML = '';
+                if (data.sources.length === 0) {
+                    sourcesHTML = '<div class="loading">No data</div>';
+                } else {
+                    data.sources.forEach(item => {
+                        sourcesHTML += `<div style="padding: 10px; margin: 5px 0; background: #0f3460; border-radius: 5px;">
+                            <strong>${item.ip}</strong>: ${item.count} flows
+                        </div>`;
+                    });
+                }
+                document.getElementById('top-sources').innerHTML = sourcesHTML;
+                
+                let destsHTML = '';
+                if (data.destinations.length === 0) {
+                    destsHTML = '<div class="loading">No data</div>';
+                } else {
+                    data.destinations.forEach(item => {
+                        destsHTML += `<div style="padding: 10px; margin: 5px 0; background: #0f3460; border-radius: 5px;">
+                            <strong>${item.ip}</strong>: ${item.count} flows
+                        </div>`;
+                    });
+                }
+                document.getElementById('top-destinations').innerHTML = destsHTML;
+            } catch (error) {
+                console.error('Error loading top hosts:', error);
+            }
+        }
+
+        setInterval(loadData, 5000);
+        loadData();
+    </script>
+
+</body>
+</html>
