@@ -1,5 +1,6 @@
 #!/bin/bash
 # Complete setup script for secure network
+# Fixed for /home/arfa environment
 
 echo "=========================================="
 echo "🔐 SECURE NETWORK STARTUP SCRIPT"
@@ -30,6 +31,18 @@ if [ ! -f "${RYU_MANAGER}" ]; then
     echo "❌ Ryu not found at ${RYU_MANAGER}"
     echo "   Please install: cd ${RYU_VENV} && pip install ryu"
     exit 1
+fi
+
+# Start Open vSwitch service (required for switches to automatically work)
+echo "🟦 Ensuring Open vSwitch is running..."
+systemctl start openvswitch-switch 2>/dev/null || service openvswitch-switch start
+
+# Verify OVS is running
+if ! ovs-vsctl show >/dev/null 2>&1; then
+    echo "❌ Open vSwitch failed to start"
+    exit 1
+else
+    echo "✅ Open vSwitch is running"
 fi
 
 # Check Mininet
