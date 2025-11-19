@@ -2,7 +2,6 @@
 """
 Full Mininet topology with SECURITY INTEGRATION
 HQ ↔ Cloud ↔ Branch with encryption and Zero Trust
-Member 3: Security Specialist
 """
 
 from mininet.net import Mininet
@@ -15,9 +14,19 @@ import time
 import sys
 import os
 
+# Fix import path for security_module
+# Get the directory where this script is located
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+
 # Import security module
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from security_module import SecureHost as SecurityManager
+try:
+    from security_module import SecureHost as SecurityManager
+except ImportError as e:
+    print(f"❌ ERROR: Could not import security_module: {e}")
+    print(f"   Make sure security_module.py is in: {SCRIPT_DIR}")
+    sys.exit(1)
 
 
 # ---------- Router Node Definition ----------
@@ -88,7 +97,11 @@ class NetworkSecurityManager:
         
         for host_name in host_names:
             info(f'🔐 Setting up security for {host_name}...\n')
-            self.security_hosts[host_name] = SecurityManager(host_name)
+            try:
+                self.security_hosts[host_name] = SecurityManager(host_name)
+            except Exception as e:
+                info(f'❌ Failed to setup security for {host_name}: {e}\n')
+                raise
         
         info('✅ All hosts secured!\n')
     
@@ -315,14 +328,37 @@ class SecurityCLI(CLI):
             info('Usage: revoke <host1> <host2>\n')
             return
         
-        host1_sec = self.security_mgr.security_hosts.get(args[0])
+        host1, host2 = args[0], args[1]
+        
+        # Revoke in security modules (one-directional trust)
+        host1_sec = self.security_mgr.security_hosts.get(host1)
+        host2_sec = self.security_mgr.security_hosts.get(host2)
+        
         if host1_sec:
-            host1_sec.revoke_host(args[1])
-            info(f'✅ {args[0]} revoked trust for {args[1]}\n')
+            host1_sec.revoke_host(host2)
+            info(f'✅ {host1} revoked trust for {host2}\n')
+        
+        if host2_sec:
+            host2_sec.revoke_host(host1)
+            info(f'✅ {host2} revoked trust for {host1}\n')
+        
+        # Remove from verified_pairs (bidirectional communication prevention)
+        pairs_to_remove = [
+            (host1, host2),
+            (host2, host1)
+        ]
+        
+        for pair in pairs_to_remove:
+            if pair in self.security_mgr.verified_pairs:
+                self.security_mgr.verified_pairs.remove(pair)
+                info(f'🔒 Removed verified pair: {pair[0]} → {pair[1]}\n')
+        
+        info(f'⚠️ Secure channel between {host1} and {host2} is now CLOSED\n')
 
 
 # ---------- Run Network ----------
 def run():
+    """Main function to setup and run the network"""
     topo = OfficeNetwork()
     net = Mininet(topo=topo, controller=None, switch=OVSSwitch, link=TCLink, waitConnected=True)
 
@@ -335,7 +371,7 @@ def run():
 
     # Wait for controller
     info('*** Waiting for controller connection...\n')
-    time.sleep(2)
+    time.sleep(3)
 
     info('\n*** Setting up static routes\n')
     rHQ = net['rHQ']
@@ -359,10 +395,20 @@ def run():
     info('INITIALIZING SECURITY LAYER (Member 3)\n')
     info('=' * 60 + '\n')
     
-    security_mgr = NetworkSecurityManager(net)
+    try:
+        security_mgr = NetworkSecurityManager(net)
+    except Exception as e:
+        info(f'\n❌ Security initialization failed: {e}\n')
+        info('Network will continue without security features\n')
+        CLI(net)
+        net.stop()
+        return
     
     # Run security demonstration
-    demonstrate_security(security_mgr)
+    try:
+        demonstrate_security(security_mgr)
+    except Exception as e:
+        info(f'\n⚠️ Security demo error: {e}\n')
 
     info('\n*** Network ready! Launching Security-Enhanced CLI...\n')
     info('\n📋 Available Security Commands:\n')

@@ -1,7 +1,5 @@
 # Network Security Implementation - Project Report
 
-**Member 3: Security Specialist (Encryption + Zero Trust)**
-
 ---
 
 ## Executive Summary
@@ -67,7 +65,7 @@ This project implements a comprehensive network security solution integrating:
 
 ---
 
-## 2. Security Implementation (Member 3)
+## 2. Security Implementation
 
 ### 2.1 Cryptography Components
 
@@ -464,7 +462,6 @@ The implementation demonstrates industry-standard security practices and provide
 ---
 
 **Project Completed**: November 2024  
-**Member 3**: Security Specialist  
 **Grade**: Awaiting Evaluation
 
 ---# SDN-Firewall-with-End-to-End-Encryption

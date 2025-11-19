@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 Ryu OpenFlow 1.3 Firewall Controller with SECURITY INTEGRATION
-Member 2 + Member 3 collaboration
 """
 
 import json
@@ -205,24 +204,36 @@ class SecureFirewallController(app_manager.RyuApp):
     def _is_traffic_encrypted(self, pkt):
         """
         Detect if traffic is encrypted
-        In production, check for encryption headers/markers
-        For demo, randomly mark some traffic as encrypted
+        Check for Fernet token patterns
         """
-        # Simple heuristic: check if payload looks encrypted
-        # Real implementation would check actual encryption markers
         try:
-            # Get payload
-            payload = pkt.protocols[-1]
-            if isinstance(payload, bytes) and len(payload) > 50:
-                # Very simple check: encrypted data has high entropy
-                # This is just for demo - real check would be more sophisticated
-                unique_bytes = len(set(payload[:50]))
-                if unique_bytes > 40:  # High byte diversity suggests encryption
-                    return True
-        except:
-            pass
-        
-        return False
+            # Get IP packet
+            ip_pkt = pkt.get_protocol(ipv4.ipv4)
+            if not ip_pkt:
+                return False
+            
+            # Get raw packet data
+            if hasattr(pkt, 'data'):
+                payload = bytes(pkt.data) if pkt.data else b''
+                
+                if len(payload) > 20:
+                    # Check for Fernet base64 pattern (gAAAAA or gAAAAAB)
+                    try:
+                        payload_str = payload.decode('utf-8', errors='ignore')
+                        if 'gAAAAA' in payload_str or 'gAAAAAB' in payload_str:
+                            return True
+                    except:
+                        pass
+                    
+                    # High entropy check (encrypted data has random-looking bytes)
+                    if len(payload) > 50:
+                        unique = len(set(payload[:50]))
+                        if unique > 40:  # More than 40 unique bytes in first 50
+                            return True
+            
+            return False
+        except Exception as e:
+            return False
     
     def _log_intrusion_attempt(self, src_ip, dst_ip, reason):
         """Log potential intrusion attempt"""
